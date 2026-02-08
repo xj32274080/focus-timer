@@ -519,6 +519,8 @@
   let timer = null;
   let totalSeconds = 0;
   let remainSeconds = 0;
+  let endAtMs = 0;     // 预计结束时间戳（毫秒）
+  let pauseAtMs = 0;   // 暂停开始时间戳（毫秒）
   let paused = false;
   let currentTask = "";
 
@@ -684,6 +686,10 @@
     remainSeconds = totalSeconds;
     paused = false;
 
+    // 用真实时间驱动（避免后台标签页 setInterval 被降频导致计时不准）
+    endAtMs = Date.now() + totalSeconds * 1000;
+    pauseAtMs = 0;
+
     taskText.textContent = `当前任务：${currentTask}`;
     pauseBtn.textContent = "暂停休息";
     timeText.textContent = fmt(remainSeconds);
@@ -694,31 +700,52 @@
     if(timer) clearInterval(timer);
     timer = setInterval(()=>{
       if(paused) return;
-      remainSeconds = Math.max(0, remainSeconds - 1);
+
+      const remain = Math.ceil((endAtMs - Date.now()) / 1000);
+      remainSeconds = Math.max(0, remain);
       timeText.textContent = fmt(remainSeconds);
+
       if(remainSeconds <= 0){
         clearInterval(timer);
         timer = null;
         onFinish(true);
       }
-    }, 1000);
+    }, 250);
   }
 
   function togglePause(){
+    // 先用当前时间校正一下剩余秒数
+    const remain = Math.ceil((endAtMs - Date.now()) / 1000);
+    remainSeconds = Math.max(0, remain);
+    timeText.textContent = fmt(remainSeconds);
+
     paused = !paused;
     pauseBtn.textContent = paused ? "继续专注" : "暂停休息";
 
-    if(focusVideo){
-      if(paused) focusVideo.pause();
-      else ensureVideoPlaying();
+    if(paused){
+      pauseAtMs = Date.now();
+      if(focusVideo) focusVideo.pause();
+      toastMsg(toastFocus, "已暂停");
+    }else{
+      const pausedDur = Date.now() - (pauseAtMs || Date.now());
+      endAtMs += pausedDur; // 把暂停的时间加回结束时间
+      pauseAtMs = 0;
+      if(focusVideo) ensureVideoPlaying();
+      toastMsg(toastFocus, "继续啦");
     }
-
-    toastMsg(toastFocus, paused ? "已暂停" : "继续啦");
   }
 
   function onFinish(natural=false){
+    // 结束前先用真实时间校正一次，避免后台降频导致的误差
+    if(!paused && endAtMs){
+      const remain = Math.ceil((endAtMs - Date.now()) / 1000);
+      remainSeconds = Math.max(0, remain);
+    }
+
     if(timer) clearInterval(timer);
     timer = null;
+    endAtMs = 0;
+    pauseAtMs = 0;
 
     if(focusVideo) focusVideo.pause();
 
@@ -742,6 +769,8 @@
     if(timer) clearInterval(timer);
     timer = null;
     paused = false;
+    endAtMs = 0;
+    pauseAtMs = 0;
 
     if(focusVideo) focusVideo.pause();
 
